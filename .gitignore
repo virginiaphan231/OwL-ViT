@@ -1,0 +1,15 @@
+# Ignore the entire COCO dataset directory
+COCO dataset/
+coco_minitrain_25k/
+# Ignore specific files by name
+Dockerfile
+test_cuda.py
+# Ignore all file with the .pyc extension
+*.pyc
+# Ignore a scecific JSON file
+instances_minitrain2017.json
+# Ignore checkpoints folder
+checkpoints/
+
+
+
