@@ -10,6 +10,8 @@ test_cuda.py
 instances_minitrain2017.json
 # Ignore checkpoints folder
 checkpoints/
+# Ignore .vscode
+.vscode/
 
 
 
