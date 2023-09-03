@@ -47,7 +47,6 @@ Pygments==2.15.1
 pyparsing==3.0.9
 python-dateutil==2.8.2
 PyWavelets==1.4.1
-pywin32==306
 PyYAML==6.0.1
 pyzmq==25.1.0
 qudida==0.0.4
