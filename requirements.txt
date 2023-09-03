@@ -64,7 +64,6 @@ tifffile==2023.8.25
 timm==0.9.6
 tokenizers==0.13.3
 torch==2.0.1
-torchaudio==2.0.2+cu117
 torchvision==0.15.2
 tornado==6.3.2
 tqdm==4.65.0
