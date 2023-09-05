@@ -179,14 +179,13 @@ def compute_cost(*,
     print("Total loss shape", total_loss.shape)
     # Determine mask value dynamically.
     
-
     mask = mask.unsqueeze(1)
     mask = mask.to(total_loss.device)
 
     # Determine mask value dynamically.
-    cost_mask_value = torch.max(torch.where(mask, total_loss, -1e10), dim=(1, 2))[0]
+    cost_mask_value = torch.max(torch.where(mask, total_loss, -1e10), dim=2)[0]
     # Special case.
-    all_masked = torch.all(~mask, dim=(1, 2))
+    all_masked = torch.all(~mask, dim=2)
     cost_mask_value = torch.where(~all_masked, cost_mask_value, 1.0)
     cost_mask_value = cost_mask_value.unsqueeze(1).unsqueeze(2) * 1.1 + 10.0
 
