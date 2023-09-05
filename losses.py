@@ -143,7 +143,9 @@ def compute_cost(*,
     # Repeat reshaped_pred_boxes to match the number of queries
     tiled_pred_boxes = reshaped_pred_box.repeat(num_queries, 1)
     # Reshape back to [batch_size, num_queries, num_patches, 4]
-    reshaped_out_box = tiled_pred_boxes.view(batch_size, num_queries, num_patches, 4)
+    reshaped_pred_boxes = tiled_pred_boxes.view(batch_size, num_queries, num_patches, 4)
+    # Select the appropriate indices to get [batch_size, num_queries, 4]
+    output_bbox = reshaped_pred_boxes[:, :, 0, :]
 
     
     ####################################
@@ -159,15 +161,15 @@ def compute_cost(*,
     
     
     # Compute absolute differences between predicted bbox and target bbox.
-    padded_tgt_bbox = padded_tgt_bbox.to(reshaped_out_box.device)
-    diff = torch.abs(reshaped_out_box[:, :, None] - padded_tgt_bbox[:, None, :])  # [B, N, M, 4]
+    padded_tgt_bbox = padded_tgt_bbox.to(output_bbox.device)
+    diff = torch.abs(output_bbox[:, :, None] - padded_tgt_bbox[:, None, :])  # [B, N, M, 4]
     
     # Compute bbox loss by summing differences along the last dimension (coordinates).
     loss_bbox = diff.sum(dim=-1) 
     
     
     # Compute generalized IoU (GIoU) loss using specialized function
-    loss_giou = -generalized_box_iou(box_cxcywh_to_xyxy(reshaped_out_box),
+    loss_giou = -generalized_box_iou(box_cxcywh_to_xyxy(output_bbox),
                                      box_cxcywh_to_xyxy(padded_tgt_bbox),
                                      all_pairs=True)
     
