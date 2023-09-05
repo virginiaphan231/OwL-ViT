@@ -182,14 +182,18 @@ def compute_cost(*,
     mask = mask.unsqueeze(1)
     mask = mask.to(total_loss.device)
 
+    # Determine mask value dynamically and invert it using ~.
+    inverted_mask = ~mask
+
     # Determine mask value dynamically.
     cost_mask_value = torch.max(torch.where(mask, total_loss, -1e10), dim=2)[0]
-    # Special case.
-    all_masked = torch.all(~mask, dim=2)
+    
+    # Special case: use inverted mask for (1.0 - mask) operation.
+    all_masked = torch.all(inverted_mask, dim=2)
     cost_mask_value = torch.where(~all_masked, cost_mask_value, 1.0)
     cost_mask_value = cost_mask_value.unsqueeze(1).unsqueeze(2) * 1.1 + 10.0
 
-    total_loss = total_loss * mask + (1.0 - mask) * cost_mask_value
+    total_loss = total_loss * mask + (~mask) * cost_mask_value
 
     # Guard against NaNs and Infs.
     total_loss = torch.nan_to_num(total_loss, nan=cost_mask_value, posinf=cost_mask_value, neginf=cost_mask_value)
