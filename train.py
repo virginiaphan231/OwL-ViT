@@ -2,6 +2,10 @@ from model import *
 from box_utils import *
 from data import *
 from losses import *
+import torch
+import torch.nn as nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 import torch.optim as optim
@@ -10,9 +14,11 @@ import random
 import numpy as np
 from tqdm import tqdm
 from transformers import OwlViTProcessor
+import matplotlib.pyplot as plt
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train your model")
+    parser.add_argument("--distributed", type = bool, default= False, help = "Training with DDP")
     parser.add_argument("--train_data_dir", type=str, default="path/to/train/data", help="Path to training data directory")
     parser.add_argument("--ann_file", type=str, default="path/to/annotations.json", help="Path to annotation file")
     parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs for training")
@@ -27,12 +33,13 @@ def parse_args():
     parser.add_argument("--focal_gamma", type=float, default=2.0, help="Gamma parameter for focal loss")
     parser.add_argument("--freeze_encoders", type=bool, default=True, help="Whether to freeze encoders")
     parser.add_argument("--checkpoints_dir", type = str, help = "path to save checkpoints file")
+    parser.add_argument("--fig_path", type = str, help= "Path to save loss figure")
     args = parser.parse_args()
     return args
 
 def train_model(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    
+
     # Set random seed for reproducibility
     random_seed = 42
     random.seed(random_seed)
@@ -48,6 +55,14 @@ def train_model(args):
 
     processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
     model = OwlViTForObjectDetectionModel.from_pretrained("google/owlvit-base-patch32")
+
+    if args.distributed:
+        # Initialize DistributedDataParallel if distributed training is enabled
+        if torch.cuda.device_count() > 1:
+            print("Using multiple GPUs for training.")
+            model = DDP(model)
+        else:
+            print("Distributed training requested but only one GPU available.")
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999))
@@ -118,7 +133,9 @@ def train_model(args):
     plt.ylabel('Training Loss')
     plt.title('Training Loss Over Epochs')
     plt.grid(True)
+    plt.savefig(fname = args.fig_path, format = "png")
     plt.show()
+    
 
 if __name__ == "__main__":
     args = parse_args()

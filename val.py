@@ -7,9 +7,10 @@ from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from transformers import OwlViTProcessor
-from data import CustomCocoDataset, custom_collate_fn
-from box_utils import box_cxcywh_to_xywh
+from data import *
+from box_utils import *
 from model import OwlViTForObjectDetectionModel
+import matplotlib.pyplot as plt
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate your object detection model")
@@ -18,10 +19,12 @@ def parse_args():
     parser.add_argument("--checkpoint_path", type=str, help="Path to trained model checkpoint")
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
     parser.add_argument("--num_worker", type=int, default=0, help="Number of workers for data loading")
+    parser.add_argument("--plot_path", type=str, help="Path to save Evaluation plot")
     args = parser.parse_args()
     return args
 
 def get_normalized_predictions(model, images, batch_text_labels, device):
+    processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
     inputs = processor(images=images, text=batch_text_labels, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}  
 
@@ -34,41 +37,48 @@ def get_normalized_predictions(model, images, batch_text_labels, device):
 
     return pred_boxes, pred_probs, pred_labels
 
-def evaluate_model(test_data_dir, eval_ann_file, checkpoint_path, batch_size, num_worker):
+def evaluate_model(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    coco_gt = COCO(eval_ann_file)
+    coco_gt = COCO(args.eval_ann_file)
     coco_dt = []
 
-    test_dataset = CustomCocoDataset(annotation_file=eval_ann_file, data_dir=test_data_dir, is_train=False)
+    test_dataset = CustomCocoDataset(annotation_file=args.eval_ann_file, data_dir=args.test_data_dir, is_train=False)
     
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=num_worker, collate_fn=custom_collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_worker, collate_fn=custom_collate_fn)
 
     processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
     model = OwlViTForObjectDetectionModel.from_pretrained("google/owlvit-base-patch32")
+    model.to(device)
     
     # Load the trained model checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint)
-    model.eval()
-    
+    if os.path.exists(args.checkpoint_path):
+        checkpoint = torch.load(args.checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint)
+        model.eval()
+    else:
+        print("Model checkpoint not found. Please provide a valid checkpoint path.")
+        return
+
     with tqdm(test_loader) as t:
-        for image_idx, (images, targets) in enumerate(t):
+        for images, targets in t:
             images = [img.to(device) for img in images]
             batch_text_labels = [target["text_labels"] for target in targets]
+            batch_image_ids = [target["image_id"] for target in targets]  # Get the image_id for each image in the batch
 
             pred_boxes, pred_probs, pred_labels = get_normalized_predictions(model, images, batch_text_labels, device)
 
-            for box, score, label in zip(pred_boxes, pred_probs, pred_labels):
-                coco_dt.append({"image_id": targets[image_idx]["image_id"],  # Use the image ID corresponding to the current image
-                                "category_id": label.item(),
+            for image_id, box, score, label in zip(batch_image_ids,pred_boxes, pred_probs, pred_labels):
+                coco_dt.append({"image_id": image_id,  # Use the image ID corresponding to the current image
+                                "category_id": label.tolist(),
                                 "bbox": box.tolist(),
-                                "score": score.item()})
+                                "score": score.tolist()})
+            print(coco_dt)
 
-                        
-    with open("coco_detection_results.json", "w") as json_file:
+    output_json_path = os.path.join(args.test_data_dir, "coco_detection_results.json")
+    with open(output_json_path, "w") as json_file:
         json.dump(coco_dt, json_file)
 
-    coco_res = coco_gt.loadRes("coco_detection_results.json")
+    coco_res = coco_gt.loadRes(output_json_path)
     coco_eval = COCOeval(coco_gt, coco_res, "bbox")
     coco_eval.evaluate()
     coco_eval.accumulate()
@@ -84,14 +94,20 @@ def evaluate_model(test_data_dir, eval_ann_file, checkpoint_path, batch_size, nu
         'AP_large': coco_eval.stats[5],  # AP for large objects
     }
 
+    return evaluation_results
+
 if __name__ == "__main__":
     args = parse_args()
-    evaluate_model(args.test_data_dir, args.eval_ann_file, args.checkpoint_path, args.batch_size, args.num_worker)
+    evaluation_results = evaluate_model(args)
 
-    # Plot the results
-    plt.bar(results.keys(), results.values())
-    plt.xlabel('Evaluation Metric')
-    plt.ylabel('Score')
-    plt.title('Object Detection Evaluation Results')
-    plt.show()
+    if evaluation_results:
+        # Plot the results
+        plt.bar(evaluation_results.keys(), evaluation_results.values())
+        plt.xlabel('Evaluation Metric')
+        plt.ylabel('Score')
+        plt.title('Object Detection Evaluation Results')
+        plt.savefig(fname=args.plot_path, format="png")
+        plt.show()
+
+
 
