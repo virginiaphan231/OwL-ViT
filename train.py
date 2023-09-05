@@ -101,7 +101,7 @@ def train_model(args):
                     focal_loss= args.focal_loss,
                     focal_alpha = args.focal_alpha,
                     focal_gamma = args.focal_gamma
-                ).sum()
+                ).mean()
                 loss.backward()
                 
                 optimizer.step()

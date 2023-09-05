@@ -105,10 +105,10 @@ def compute_cost(*,
     # Number of non-padding labels for each of the target instances.
     n_labels_per_instance = torch.sum(desired_labels[..., 1:], dim=-1)
     mask = n_labels_per_instance > 0  # [B, M]
-    
+
 
     # Make sure padding target is 0 for instances with other labels.
-    desired_tgt_labels = torch.cat([~mask.unsqueeze(-1), desired_labels[..., 1:]], dim=-1)
+    desired_tgt_labels = torch.cat([(~mask.unsqueeze(-1)).float(), desired_labels[..., 1:]], dim=-1)
 
     # Convert tgt_bbox into desired dimensions 
     def pad_tensors_with_variable_lengths(tensors, padding_value=0):
@@ -176,26 +176,37 @@ def compute_cost(*,
     
     # Combine all the losses
     total_loss = loss_class * class_loss_coef + loss_bbox * bbox_loss_coef + loss_giou * giou_loss_coef
-    
+    print(f"class loss {loss_class.sum()} loss_bbox {loss_bbox.sum()} loss giou {loss_giou.sum()}")
+
     # Determine mask value dynamically.
     
     mask = mask.unsqueeze(1)
     mask = mask.to(total_loss.device)
 
+
     # Determine mask value dynamically and invert it using ~.
     inverted_mask = ~mask
 
     # Determine mask value dynamically.
-    cost_mask_value = torch.max(torch.where(mask, total_loss, -1e10), dim=2)[0]
+    cost_mask_value, _ = torch.max(torch.where(mask, total_loss, torch.full_like(total_loss, -1e10)), dim=2, keepdim=True)
+    cost_mask_value, _ = torch.max(cost_mask_value, dim=1, keepdim=True)  # Use .values to access the tensor
     
-    # Special case: use inverted mask for (1.0 - mask) operation.
-    all_masked = torch.all(inverted_mask, dim=2)
-    cost_mask_value = torch.where(~all_masked, cost_mask_value, 1.0)
-    cost_mask_value = cost_mask_value.unsqueeze(1).unsqueeze(2) * 1.1 + 10.0
+    # Special case.
+    all_masked = ~mask.all()
+    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor(1.0))
+    cost_mask_value = cost_mask_value * 1.1 + 10.0
+
 
     total_loss = total_loss * mask + (~mask) * cost_mask_value
 
     # Guard against NaNs and Infs.
-    total_loss = torch.nan_to_num(total_loss, nan=float(cost_mask_value), posinf=float(cost_mask_value), neginf=float(cost_mask_value))
-    print("Total loss shape", total_loss.shape)
+    ## Handle NaN in total_loss
+    # Identify NaN values in total_loss
+    nan_mask = torch.isnan(total_loss)
+    # Calculate total_loss with conditional statement to handle NaN values
+    total_loss[nan_mask] = cost_mask_value.expand_as(total_loss)[nan_mask]
+    # Handle Infs in total_loss
+    inf_mask = torch.isinf(total_loss)
+    total_loss[inf_mask] = cost_mask_value.expand_as(total_loss)[inf_mask]
+
     return total_loss
