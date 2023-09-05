@@ -60,6 +60,9 @@ def train_model(args):
         # Initialize DistributedDataParallel if distributed training is enabled
         if torch.cuda.device_count() > 1:
             print("Using multiple GPUs for training.")
+            # Initialize the default process group
+            dist.init_process_group(backend='nccl')  # Use 'nccl' for GPU-based training
+
             model = DDP(model)
         else:
             print("Distributed training requested but only one GPU available.")
