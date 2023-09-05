@@ -179,13 +179,17 @@ def compute_cost(*,
     # Determine mask value dynamically.
     device = total_loss.device  # Get the device of the total_loss tensor
 
-    cost_mask_values = torch.where(mask[:, :, None].to(device), total_loss, -1e10)
-    cost_mask_value = torch.max(cost_mask_values, dim=(1, 2)).values
+    # Expand the tensor to match the shape of total_loss
+    expanded_tensor = torch.tensor(-1e10, dtype=total_loss.dtype, device=device).expand_as(total_loss)
+
+    cost_mask_value = torch.max(torch.where(mask, total_loss, expanded_tensor), dim=(1, 2)).values
 
     # Special case.
     all_masked = torch.all(~mask, dim=(1, 2))
-    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor([1.0], device=device))
+    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor([1.0], dtype=total_loss.dtype, device=device))
     cost_mask_value = cost_mask_value[:, None, None] * 1.1 + 10.0
+
+    cost = cost * mask + (1.0 - mask) * cost_mask_value
 
     total_loss = total_loss * mask + (1.0 - mask) * cost_mask_value
     # Guard against NaNs and Infs.
