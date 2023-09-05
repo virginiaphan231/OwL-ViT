@@ -196,6 +196,6 @@ def compute_cost(*,
     total_loss = total_loss * mask + (~mask) * cost_mask_value
 
     # Guard against NaNs and Infs.
-    total_loss = torch.nan_to_num(total_loss, nan=cost_mask_value, posinf=cost_mask_value, neginf=cost_mask_value)
+    total_loss = torch.nan_to_num(total_loss, nan=float(cost_mask_value), posinf=float(cost_mask_value), neginf=float(cost_mask_value))
     print("Total loss shape", total_loss.shape)
     return total_loss
