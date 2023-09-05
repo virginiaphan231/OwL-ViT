@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument("--class_loss_coef", type=float, default=1.0, help="Coefficient for class loss")
     parser.add_argument("--bbox_loss_coef", type=float, default=2.0, help="Coefficient for bbox loss")
     parser.add_argument("--giou_loss_coef", type=float, default=2.0, help="Coefficient for GIoU loss")
-    parser.add_argument("--focal_loss", type=bool, defagult=True, help="Whether to use focal loss")
+    parser.add_argument("--focal_loss", type=bool, default=True, help="Whether to use focal loss")
     parser.add_argument("--focal_alpha", type=float, default=0.25, help="Alpha parameter for focal loss")
     parser.add_argument("--focal_gamma", type=float, default=2.0, help="Gamma parameter for focal loss")
     parser.add_argument("--freeze_encoders", type=bool, default=True, help="Whether to freeze encoders")
