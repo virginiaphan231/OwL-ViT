@@ -105,7 +105,7 @@ def compute_cost(*,
     # Number of non-padding labels for each of the target instances.
     n_labels_per_instance = torch.sum(desired_labels[..., 1:], dim=-1)
     mask = n_labels_per_instance > 0  # [B, M]
-    print("mask shape", mask.shape)
+    
 
     # Make sure padding target is 0 for instances with other labels.
     desired_tgt_labels = torch.cat([~mask.unsqueeze(-1), desired_labels[..., 1:]], dim=-1)
@@ -176,7 +176,7 @@ def compute_cost(*,
     
     # Combine all the losses
     total_loss = loss_class * class_loss_coef + loss_bbox * bbox_loss_coef + loss_giou * giou_loss_coef
-    print("Total loss shape", total_loss.shape)
+    
     # Determine mask value dynamically.
     
     mask = mask.unsqueeze(1)
@@ -193,5 +193,5 @@ def compute_cost(*,
 
     # Guard against NaNs and Infs.
     total_loss = torch.nan_to_num(total_loss, nan=cost_mask_value, posinf=cost_mask_value, neginf=cost_mask_value)
-
+    print("Total loss shape", total_loss.shape)
     return total_loss
