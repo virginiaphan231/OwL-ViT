@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train your model")
-    parser.add_argument("--distributed", type = bool, default= False, help = "Training with DDP")
     parser.add_argument("--train_data_dir", type=str, default="path/to/train/data", help="Path to training data directory")
     parser.add_argument("--ann_file", type=str, default="path/to/annotations.json", help="Path to annotation file")
     parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs for training")
@@ -56,16 +55,6 @@ def train_model(args):
     processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
     model = OwlViTForObjectDetectionModel.from_pretrained("google/owlvit-base-patch32")
 
-    if args.distributed:
-        # Initialize DistributedDataParallel if distributed training is enabled
-        if torch.cuda.device_count() > 1:
-            print("Using multiple GPUs for training.")
-            # Initialize the default process group
-            dist.init_process_group(backend='nccl')  # Use 'nccl' for GPU-based training
-
-            model = DDP(model)
-        else:
-            print("Distributed training requested but only one GPU available.")
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999))
