@@ -177,14 +177,17 @@ def compute_cost(*,
     total_loss = loss_class * class_loss_coef + loss_bbox * bbox_loss_coef + loss_giou * giou_loss_coef
     
     # Determine mask value dynamically.
-    cost_mask_value = torch.max(torch.where(mask[:, :, None], total_loss, -1e10), dim=(1, 2)).values
+    device = total_loss.device  # Get the device of the total_loss tensor
+
+    cost_mask_value = torch.max(torch.where(mask[:, :, None].to(device), total_loss, -1e10), dim=(1, 2)).values
     # Special case.
     all_masked = torch.all(~mask, dim=(1, 2))
-    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor([1.0], device=cost_mask_value.device))
+    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor([1.0], device=device))
     cost_mask_value = cost_mask_value[:, None, None] * 1.1 + 10.0
 
     total_loss = total_loss * mask + (1.0 - mask) * cost_mask_value
     # Guard against NaNs and Infs.
     total_loss = torch.nan_to_num(total_loss, nan=cost_mask_value, posinf=cost_mask_value, neginf=cost_mask_value)
+
 
     return total_loss
