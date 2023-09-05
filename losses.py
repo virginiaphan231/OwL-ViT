@@ -140,8 +140,10 @@ def compute_cost(*,
     
     # Reshape bounding box tensor's dimension
     reshaped_pred_box = out_bbox.view(-1, 4)
-    # Reshape directly to [batch_size, num_queries, num_patches, 4]
-    reshaped_out_box = reshaped_pred_box.view(batch_size, num_queries, num_patches, 4)
+    # Repeat reshaped_pred_boxes to match the number of queries
+    tiled_pred_boxes = reshaped_pred_box.repeat(num_queries, 1)
+    # Reshape back to [batch_size, num_queries, num_patches, 4]
+    reshaped_out_box = tiled_pred_boxes.view(batch_size, num_queries, num_patches, 4)
 
     
     ####################################
