@@ -105,6 +105,7 @@ def compute_cost(*,
     # Number of non-padding labels for each of the target instances.
     n_labels_per_instance = torch.sum(desired_labels[..., 1:], dim=-1)
     mask = n_labels_per_instance > 0  # [B, M]
+    print("mask shape", mask.shape)
 
     # Make sure padding target is 0 for instances with other labels.
     desired_tgt_labels = torch.cat([~mask.unsqueeze(-1), desired_labels[..., 1:]], dim=-1)
@@ -175,26 +176,22 @@ def compute_cost(*,
     
     # Combine all the losses
     total_loss = loss_class * class_loss_coef + loss_bbox * bbox_loss_coef + loss_giou * giou_loss_coef
-    
+    print("Total loss shape", total_loss.shape)
     # Determine mask value dynamically.
-    device = total_loss.device  # Get the device of the total_loss tensor
+    
 
-    # Expand the tensor to match the shape of total_loss
-    expanded_tensor = torch.tensor(-1e10, dtype=total_loss.dtype, device=device).expand_as(total_loss)
+    mask = mask.unsqueeze(1)
 
-    cost_mask_value = torch.max(torch.where(mask, total_loss, expanded_tensor), dim=(1, 2)).values
-
+    # Determine mask value dynamically.
+    cost_mask_value = torch.max(torch.where(mask, total_loss, -1e10), dim=(1, 2))[0]
     # Special case.
     all_masked = torch.all(~mask, dim=(1, 2))
-    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor([1.0], dtype=total_loss.dtype, device=device))
-    cost_mask_value = cost_mask_value[:, None, None] * 1.1 + 10.0
-
-    cost = cost * mask + (1.0 - mask) * cost_mask_value
+    cost_mask_value = torch.where(~all_masked, cost_mask_value, 1.0)
+    cost_mask_value = cost_mask_value.unsqueeze(1).unsqueeze(2) * 1.1 + 10.0
 
     total_loss = total_loss * mask + (1.0 - mask) * cost_mask_value
+
     # Guard against NaNs and Infs.
     total_loss = torch.nan_to_num(total_loss, nan=cost_mask_value, posinf=cost_mask_value, neginf=cost_mask_value)
-
-
 
     return total_loss
