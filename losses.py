@@ -157,7 +157,7 @@ def compute_cost(*,
                              focal_gamma=focal_gamma)   # [B, N, C]
     
     desired_tgt_labels = desired_tgt_labels.to(loss_class.device)
-    loss_class = torch.einsum('bnl,bml->bnm', loss_class, desired_labels)
+    loss_class = torch.einsum('bnl,bml->bnm', loss_class, desired_tgt_labels)
     
     
     # Compute absolute differences between predicted bbox and target bbox.
