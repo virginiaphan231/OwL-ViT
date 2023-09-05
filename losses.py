@@ -96,13 +96,20 @@ def compute_cost(*,
     padded_tgt_labels = torch.stack(padded_tgt_labels)
     
     # Convert tgt_labels to desired shape [B, M, C]
-    desired_labels = torch.zeros(padded_tgt_labels.size(0), num_queries , num_classes)
+    desired_labels = torch.zeros(padded_tgt_labels.size(0), num_queries, num_classes)
     for b in range(padded_tgt_labels.size(0)):
-        for m in range(max_length_labels):
-            label = int(padded_tgt_labels[b, m])  # Convert tensor to integer
-            if label >= 0:   # Skip instances with label < 0 (blank list)
-                desired_labels[b, m, label] = 1
+        labels = padded_tgt_labels[b].long()  # Convert to long for indexing
+        desired_labels[b, torch.arange(max_length_labels), labels] = 1
 
+
+    # Number of non-padding labels for each of the target instances.
+    n_labels_per_instance = torch.sum(desired_labels[..., 1:], dim=-1)
+    mask = n_labels_per_instance > 0  # [B, M]
+
+    # Make sure padding target is 0 for instances with other labels.
+    desired_tgt_labels = torch.cat([~mask.unsqueeze(-1), desired_labels[..., 1:]], dim=-1)
+
+    # Convert tgt_bbox into desired dimensions 
     def pad_tensors_with_variable_lengths(tensors, padding_value=0):
         max_num_boxes = max(tensor.size(0) for tensor in tensors)
         padded_tensors = []
@@ -120,15 +127,8 @@ def compute_cost(*,
     # Convert tgt_bbox format from [x_min, y_min, w, h] (COCO dataset) to [center_x, center_y, w, h]
     padded_tgt_bbox = box_xywh_to_cxcywh(padded_tgt_bbox)
     
-    # # Convert tgt_bbox to padded tensor
-    # padded_tgt_bbox = torch.nn.utils.rnn.pad_sequence([boxes.clone().detach().requires_grad_(True) for boxes in tgt_bbox], batch_first=True)
-    
-    """
-    Removed mask-related computation in original codes
-    https://github.com/google-research/scenic/blob/main/scenic/projects/owl_vit/losses.py
-    """ 
     ###################################
-    #Reshape output's dimension into desired dimensions of written cost function 
+    #Reshape output logits dimension into desired dimensions of written cost function 
     batch_size, num_patches, num_queries = out_logits.size()
     
     # Permute the out_logits dimensions to get [batch_size, num_queries, num_patches]
@@ -140,12 +140,9 @@ def compute_cost(*,
     
     # Reshape bounding box tensor's dimension
     reshaped_pred_box = out_bbox.view(-1, 4)
-    # Repeat reshaped_pred_boxes to match the number of queries
-    tiled_pred_boxes = reshaped_pred_box.repeat(num_queries, 1)
-    # Reshape back to [batch_size, num_queries, num_patches, 4]
-    reshaped_pred_boxes = tiled_pred_boxes.view(batch_size, num_queries, num_patches, 4)
-    # Select the appropriate indices to get [batch_size, num_queries, 4]
-    output_bbox = reshaped_pred_boxes[:, :, 0, :]
+    # Reshape directly to [batch_size, num_queries, num_patches, 4]
+    reshaped_out_box = reshaped_pred_box.view(batch_size, num_queries, num_patches, 4)
+
     
     ####################################
     
@@ -155,26 +152,34 @@ def compute_cost(*,
                              focal_alpha=focal_alpha,
                              focal_gamma=focal_gamma)   # [B, N, C]
     
-    desired_labels = desired_labels.to(loss_class.device)
+    desired_tgt_labels = desired_tgt_labels.to(loss_class.device)
     loss_class = torch.einsum('bnl,bml->bnm', loss_class, desired_labels)
     
     
     # Compute absolute differences between predicted bbox and target bbox.
-    padded_tgt_bbox = padded_tgt_bbox.to(output_bbox.device)
-    diff = torch.abs(output_bbox[:, :, None] - padded_tgt_bbox[:, None, :])  # [B, N, M, 4]
+    padded_tgt_bbox = padded_tgt_bbox.to(reshaped_out_box.device)
+    diff = torch.abs(reshaped_out_box[:, :, None] - padded_tgt_bbox[:, None, :])  # [B, N, M, 4]
     
     # Compute bbox loss by summing differences along the last dimension (coordinates).
     loss_bbox = diff.sum(dim=-1) 
     
     
     # Compute generalized IoU (GIoU) loss using specialized function
-    loss_giou = -generalized_box_iou(box_cxcywh_to_xyxy(output_bbox),
+    loss_giou = -generalized_box_iou(box_cxcywh_to_xyxy(reshaped_out_box),
                                      box_cxcywh_to_xyxy(padded_tgt_bbox),
                                      all_pairs=True)
     
-    
     # Combine all the losses
     total_loss = loss_class * class_loss_coef + loss_bbox * bbox_loss_coef + loss_giou * giou_loss_coef
-    #print(f"Class loss {loss_class.sum()}, class loss coef {class_loss_coef}, Loss bbox {loss_bbox.sum()}, bbox_loss coef {bbox_loss_coef} Loss GIoU {loss_giou.sum()}, giou_loss_coef {giou_loss_coef}")
-    # Return the computed loss tensor and n_cols
+    
+    # Determine mask value dynamically.
+    cost_mask_value = torch.max(torch.where(mask, total_loss, -1e10), dim=(1, 2)).values
+    # Special case.
+    all_masked = torch.all(~mask, dim=(1, 2))
+    cost_mask_value = torch.where(~all_masked, cost_mask_value, torch.tensor([1.0], device=cost_mask_value.device))
+    cost_mask_value = cost_mask_value[:, None, None] * 1.1 + 10.0
+
+    total_loss = total_loss * mask + (1.0 - mask) * cost_mask_value
+    # Guard against NaNs and Infs.
+    total_loss = torch.nan_to_num(total_loss, nan=cost_mask_value, posinf=cost_mask_value, neginf=cost_mask_value)
     return total_loss
