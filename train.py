@@ -82,10 +82,15 @@ def train_model(args):
                 # Batch text labels directly from the targets
                 batch_text_labels = [target["text_labels"] for target in targets]
 
+                # Batch target size for each image in the batch
+                batch_target_size = torch.tensor([img.shape[-2:] for img in images])
+
                 inputs = processor(images=images, text=batch_text_labels, return_tensors="pt")
                 inputs = {k: v.to(device) for k, v in inputs.items()}  
                 
                 outputs = model(**inputs, return_dict=True)
+                processed_outputs = processor.post_process_object_detection(outputs, target_sizes = batch_target_size)
+                
                 pred_logits = outputs["logits"]
                 pred_boxes = outputs["pred_boxes"]
 
