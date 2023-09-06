@@ -13,6 +13,7 @@ import argparse
 import random
 import numpy as np
 from tqdm import tqdm
+import pprint
 from transformers import OwlViTProcessor
 import matplotlib.pyplot as plt
 
@@ -47,17 +48,15 @@ def train_model(args):
     torch.backends.cudnn.benchmark = False
 
     train_dataset = CustomCocoDataset(annotation_file=args.ann_file, data_dir=args.train_data_dir, is_train=True)
-    
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_worker, collate_fn=custom_collate_fn)
-    
 
     processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
     model = OwlViTForObjectDetectionModel.from_pretrained("google/owlvit-base-patch32")
 
-
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999))
+
 
     epoch_losses = []
 
@@ -72,23 +71,22 @@ def train_model(args):
     for epoch in tqdm(range(args.num_epochs), desc="Training Progress", leave=False):
         model.train()
         total_loss = 0.0
+        
 
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.num_epochs}", leave=False) as t:
             for batch_idx, (images, targets) in enumerate(t):
                 images = [img.to(device) for img in images]
                 batch_target_boxes = [target["boxes"] for target in targets]
                 batch_target_labels = [target["labels"] for target in targets]
-                
+
                 # Batch text labels directly from the targets
                 batch_text_labels = [target["text_labels"] for target in targets]
-
+            
                 # Batch target size for each image in the batch
-                batch_target_size = torch.tensor([img.shape[-2:] for img in images])
+                batch_target_size = torch.tensor([img.shape[-2:] for img in images]).to(device)
 
                 inputs = processor(images=images, text=batch_text_labels, return_tensors="pt")
                 inputs = {k: v.to(device) for k, v in inputs.items()}  
-                
-                outputs = model(**inputs, return_dict=True)
 
     
                 # Accessing pred_logits and pred_boxes for calculating losses
@@ -96,27 +94,31 @@ def train_model(args):
                 pred_boxes = outputs["pred_boxes"]
 
                 loss = compute_cost(
-                    tgt_labels = batch_target_labels,
-                    out_logits = pred_logits,
-                    tgt_bbox = batch_target_boxes,
-                    out_bbox = pred_boxes,
-                    num_classes = 91,
-                    class_loss_coef = args.class_loss_coef,
-                    bbox_loss_coef = args.bbox_loss_coef,
-                    giou_loss_coef = args.giou_loss_coef,
-                    focal_loss= args.focal_loss,
-                    focal_alpha = args.focal_alpha,
-                    focal_gamma = args.focal_gamma
+                    tgt_labels=batch_target_labels,
+                    out_logits=pred_logits,
+                    tgt_bbox=batch_target_boxes,
+                    out_bbox=pred_boxes,
+                    num_classes=91,
+                    class_loss_coef=args.class_loss_coef,
+                    bbox_loss_coef=args.bbox_loss_coef,
+                    giou_loss_coef=args.giou_loss_coef,
+                    focal_loss=args.focal_loss,
+                    focal_alpha=args.focal_alpha,
+                    focal_gamma=args.focal_gamma
                 ).mean()
                 loss.backward()
-                
+
                 optimizer.step()
                 total_loss += loss.item()
+                
 
-                t.set_postfix(loss=total_loss)
+                #t.set_postfix(loss=total_loss)
+                t.set_postfix(loss=total_loss)  # Print average mAP
 
         epoch_losses.append(total_loss)
         print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {total_loss}")
+        
+
 
     # Save checkpoint after training
     checkpoint_dir = args.checkpoints_dir
@@ -138,4 +140,5 @@ def train_model(args):
 if __name__ == "__main__":
     args = parse_args()
     train_model(args)
+
 

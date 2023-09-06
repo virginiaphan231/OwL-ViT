@@ -104,6 +104,8 @@ def compute_cost(*,
 
     # Number of non-padding labels for each of the target instances.
     n_labels_per_instance = torch.sum(desired_labels[..., 1:], dim=-1)
+    # Calculate the number of true labels per instance (after removing padding labels)
+    num_true_labels = n_labels_per_instance.float()
     mask = n_labels_per_instance > 0  # [B, M]
 
 
@@ -156,10 +158,17 @@ def compute_cost(*,
                              focal_loss=focal_loss,
                              focal_alpha=focal_alpha,
                              focal_gamma=focal_gamma)   # [B, N, C]
+    print("loss class 0", loss_class.sum())
     
     desired_tgt_labels = desired_tgt_labels.to(loss_class.device)
     loss_class = torch.einsum('bnl,bml->bnm', loss_class, desired_tgt_labels)
-    
+    print("loss class 1", loss_class.sum())
+    # Normalize loss_class by number of true labels (after removing padding labels)
+    num_true_labels = num_true_labels.to(loss_class.device)
+    loss_class = loss_class / (num_true_labels[:, None, None] + 1e-5)  # Adding a small epsilon to avoid division by zero
+    print("loss class 2", loss_class.sum())
+    # Calculate the number of bounding boxes per image
+    num_bboxes_per_image = torch.sum(mask, dim=1)
     
     # Compute absolute differences between predicted bbox and target bbox.
     padded_tgt_bbox = padded_tgt_bbox.to(output_bbox.device)
@@ -167,12 +176,17 @@ def compute_cost(*,
     
     # Compute bbox loss by summing differences along the last dimension (coordinates).
     loss_bbox = diff.sum(dim=-1) 
+    # Normalize the bounding box loss by the number of bounding boxes per image
+    num_bboxes_per_image = num_bboxes_per_image.to(loss_bbox.device)
+    loss_bbox = loss_bbox / (num_bboxes_per_image[:, None, None] + 1e-5)  # Adding a small epsilon to avoid division by zero    
     
     
     # Compute generalized IoU (GIoU) loss using specialized function
     loss_giou = -generalized_box_iou(box_cxcywh_to_xyxy(output_bbox),
                                      box_cxcywh_to_xyxy(padded_tgt_bbox),
                                      all_pairs=True)
+    # Normalize the GIoU loss by the number of bounding boxes per image
+    loss_giou = loss_giou / (num_bboxes_per_image[:, None, None] + 1e-5)  # Adding a small epsilon to avoid division by zero
     
     # Combine all the losses
     total_loss = loss_class * class_loss_coef + loss_bbox * bbox_loss_coef + loss_giou * giou_loss_coef
