@@ -1,4 +1,6 @@
 import torch
+from typing import Dict, List, Optional, Tuple, Union
+from transformers.utils import TensorType
 
 # Copied from transformers.models.detr.modeling_detr._upcast
 def _upcast(t: torch.Tensor) -> torch.Tensor:
@@ -166,7 +168,7 @@ def box_xyxy_to_xywh(x):
     tf_x, tf_y, br_x, br_y = torch.split(x, 1, dim = -1)
     width = br_x - tf_x
     height = br_y - tf_y
-    return torch.cat([tf_x, tf_y, width, height])
+    return torch.cat([tf_x, tf_y, width, height], dim = -1)
 
 def make_causal_mask(
     input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device, past_key_values_length: int = 0
@@ -185,19 +187,5 @@ def make_causal_mask(
     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
 
 
-def convert_processed_outputs(processed_outputs):
-    """Change bbox format of post_process Owl_ViT output from [xyxy] in to [xywh]"""
-    modified_outputs = []
-    for output in processed_outputs:
-        modified_output = {
-            "scores": output["scores"],
-            "labels" : output["labels"],
-            "bboxes" : []
-        }
-        for box in output["boxes"]:
-            box = box_xyxy_to_xywh(box)  #Convert into [top left x, top left y, width, height]
-            modified_output["bboxes"].append(box)
-        modified_outputs.append(modified_output)
 
-    return modified_outputs
 
