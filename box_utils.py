@@ -139,7 +139,7 @@ def generalized_box_iou(boxes1: torch.Tensor,
     return iou - (area - union) / (area + eps)
 
 def box_cxcywh_to_xyxy(x):
-    """Convert boxes from [cx, cy, w, h] format into [x, y, x', y'] format"""
+    """ Convert boxes from [cx, cy, w, h] format into [x, y, x', y'] format"""
     x_c, y_c, w, h = torch.split(x, 1, dim=-1)  # Split into individual components
     x1 = x_c - 0.5 * w
     y1 = y_c - 0.5 * h
@@ -161,6 +161,13 @@ def box_cxcywh_to_xywh(x):
     y_min = center_y - (h/2)
     return torch.cat([x_min, y_min, w, h], dim = -1)
 
+def box_xyxy_to_xywh(x):
+    """Convert boxes from [top left x, top left y, bottom right x, bottom right y] format into [top left x, top left y, width, height]"""
+    tf_x, tf_y, br_x, br_y = torch.split(x, 1, dim = -1)
+    width = br_x - tf_x
+    height = br_y - tf_y
+    return torch.cat([tf_x, tf_y, width, height])
+
 def make_causal_mask(
     input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device, past_key_values_length: int = 0
 ):
@@ -176,3 +183,21 @@ def make_causal_mask(
     if past_key_values_length > 0:
         mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)
     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
+
+
+def convert_processed_outputs(processed_outputs):
+    """Change bbox format of post_process Owl_ViT output from [xyxy] in to [xywh]"""
+    modified_outputs = []
+    for output in processed_outputs:
+        modified_output = {
+            "scores": output["scores"],
+            "labels" : output["labels"],
+            "bboxes" : []
+        }
+        for box in output["boxes"]:
+            box = box_xyxy_to_xywh(box)  #Convert into [top left x, top left y, width, height]
+            modified_output["bboxes"].append(box)
+        modified_outputs.append(modified_output)
+
+    return modified_outputs
+
