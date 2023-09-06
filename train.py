@@ -90,9 +90,6 @@ def train_model(args):
                 
                 outputs = model(**inputs, return_dict=True)
 
-                # Proccesing outputs for calculating mAP
-                processed_outputs = processor.post_process_object_detection(outputs, target_sizes = batch_target_size)
-                convert_outputs = convert_processed_outputs(processed_outputs)
     
                 # Accessing pred_logits and pred_boxes for calculating losses
                 pred_logits = outputs["logits"]
