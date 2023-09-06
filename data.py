@@ -68,7 +68,7 @@ class CustomCocoDataset(Dataset):
         target_labels = torch.tensor(transformed['labels'], dtype=torch.int64)
         target_bboxes = torch.tensor(targets['bboxes'], dtype=torch.float32)
 
-        return img, {"labels": target_labels, "boxes": target_bboxes, "text_labels": targets['text_labels'], "image_id":targets["image_id"]}
+        return img, {"labels": target_labels, "boxes": target_bboxes, "text_labels": targets['text_labels']}
     
 # Define a custom collate function to handle variable-sized data
 def custom_collate_fn(batch):
