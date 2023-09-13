@@ -1,3 +1,4 @@
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union
@@ -7,20 +8,21 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 import torch.nn.functional as F
+from torchvision.ops import nms, batched_nms
+from PIL import Image
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import (
     ModelOutput,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
-    is_vision_available,
-    logging,
-    replace_return_docstrings,
-)
+    is_vision_available)
+    
+    
+from transformers import AutoProcessor
 from transformers.models.owlvit.configuration_owlvit import OwlViTConfig, OwlViTTextConfig, OwlViTVisionConfig
 from timm.models.layers import DropPath
-from box_utils import *
+from matcher import *
+from util import make_causal_mask
 
 
 if is_vision_available():
@@ -951,6 +953,14 @@ class OwlViTModel(OwlViTPreTrainedModel):
         self.text_model = OwlViTTextTransformer(text_config)
         self.vision_model = OwlViTVisionTransformer(vision_config)
 
+        # Freeze text_model:
+        for param in self.text_model.parameters():
+            param.requires_grad = False
+
+        # Freeze vision_model:
+        for param in self.vision_model.parameters():
+            param.requires_grad = False
+
         self.visual_projection = nn.Linear(self.vision_embed_dim, self.projection_dim, bias=False)
         self.text_projection = nn.Linear(self.text_embed_dim, self.projection_dim, bias=False)
         self.logit_scale = nn.Parameter(torch.tensor(config.logit_scale_init_value))
@@ -970,18 +980,7 @@ class OwlViTModel(OwlViTPreTrainedModel):
         Returns:
             text_features (`torch.FloatTensor` of shape `(batch_size, output_dim`): The text embeddings obtained by
             applying the projection layer to the pooled output of [`OwlViTTextModel`].
-
-        Examples:
-        ```python
-        >>> from transformers import AutoProcessor, OwlViTModel
-
-        >>> model = OwlViTModel.from_pretrained("google/owlvit-base-patch32")
-        >>> processor = AutoProcessor.from_pretrained("google/owlvit-base-patch32")
-        >>> inputs = processor(
-        ...     text=[["a photo of a cat", "a photo of a dog"], ["photo of a astranaut"]], return_tensors="pt"
-        ... )
-        >>> text_features = model.get_text_features(**inputs)
-        ```"""
+        """
         # Use OWL-ViT model's config for some fields (if specified) instead of those of vision & text components.
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -1000,24 +999,7 @@ class OwlViTModel(OwlViTPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> torch.FloatTensor:
-        r"""
-        Returns:
-            image_features (`torch.FloatTensor` of shape `(batch_size, output_dim`): The image embeddings obtained by
-            applying the projection layer to the pooled output of [`OwlViTVisionModel`].
-
-        Examples:
-        ```python
-        >>> from PIL import Image
-        >>> import requests
-        >>> from transformers import AutoProcessor, OwlViTModel
-
-        >>> model = OwlViTModel.from_pretrained("google/owlvit-base-patch32")
-        >>> processor = AutoProcessor.from_pretrained("google/owlvit-base-patch32")
-        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> image = Image.open(requests.get(url, stream=True).raw)
-        >>> inputs = processor(images=image, return_tensors="pt")
-        >>> image_features = model.get_image_features(**inputs)
-        ```"""
+    
         # Use OWL-ViT model's config for some fields (if specified) instead of those of vision & text components.
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1049,24 +1031,6 @@ class OwlViTModel(OwlViTPreTrainedModel):
         return_base_image_embeds: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, OwlViTOutput]:
-        r"""
-        Returns:
-
-        Examples:
-        ```python
-        >>> from PIL import Image
-        >>> import requests
-        >>> from transformers import AutoProcessor, OwlViTModel
-
-        >>> model = OwlViTModel.from_pretrained("google/owlvit-base-patch32")
-        >>> processor = AutoProcessor.from_pretrained("google/owlvit-base-patch32")
-        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> image = Image.open(requests.get(url, stream=True).raw)
-        >>> inputs = processor(text=[["a photo of a cat", "a photo of a dog"]], images=image, return_tensors="pt")
-        >>> outputs = model(**inputs)
-        >>> logits_per_image = outputs.logits_per_image  # this is the image-text similarity score
-        >>> probs = logits_per_image.softmax(dim=1)  # we can take the softmax to get the label probabilities
-        ```"""
         # Use OWL-ViT model's config for some fields (if specified) instead of those of vision & text components.
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1306,6 +1270,7 @@ class OwlViTForObjectDetectionModel(OwlViTPreTrainedModel):
             int(np.sqrt(image_embeds.shape[1])),
             image_embeds.shape[-1],
         )
+    
         text_embeds = outputs.text_embeds
         # Check if CUDA is available
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1497,3 +1462,32 @@ class OwlViTForObjectDetectionModel(OwlViTPreTrainedModel):
                                           class_embeds = class_embeds,
                                           text_model_output = text_outputs,
                                           vision_model_output = vision_outputs)
+
+class PostProcess:
+    def __init__(self, confidence_threshold, iou_threshold):
+        self.confidence_threshold = confidence_threshold
+        self.iou_threshold = iou_threshold
+
+    def __call__(self, all_pred_boxes, pred_classes):
+        # Just support batch size of one for now
+        pred_boxes = all_pred_boxes.squeeze(0)
+        pred_classes = pred_classes.squeeze(0)
+
+        top = torch.max(pred_classes, dim=1)
+        scores = top.values
+        classes = top.indices
+
+        idx = scores > self.confidence_threshold
+        scores = scores[idx]
+        classes = classes[idx]
+        pred_boxes = pred_boxes[idx]
+
+        idx = batched_nms(pred_boxes, scores, classes, iou_threshold=self.iou_threshold)
+        classes = classes[idx]
+        pred_boxes = pred_boxes[idx]
+        scores = scores[idx]
+
+        return pred_boxes.unsqueeze_(0), classes.unsqueeze_(0), scores.unsqueeze_(0)
+    
+
+

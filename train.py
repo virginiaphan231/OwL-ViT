@@ -1,146 +1,185 @@
 from model import *
-from box_utils import *
 from data import *
 from losses import *
 import torch
 import torch.nn as nn
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
 import torch.optim as optim
-import argparse
-import random
 import numpy as np
 from tqdm import tqdm
 import pprint
 from transformers import OwlViTProcessor
 import matplotlib.pyplot as plt
+import json
+import os
+import shutil
+import yaml
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torchvision.io import write_png
+from util import PostProcess
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train your model")
-    parser.add_argument("--train_data_dir", type=str, default="path/to/train/data", help="Path to training data directory")
-    parser.add_argument("--ann_file", type=str, default="path/to/annotations.json", help="Path to annotation file")
-    parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs for training")
-    parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
-    parser.add_argument("--num_worker", type=int, default=0, help="Number of workers for data loading")
-    parser.add_argument("--class_loss_coef", type=float, default=1.0, help="Coefficient for class loss")
-    parser.add_argument("--bbox_loss_coef", type=float, default=2.0, help="Coefficient for bbox loss")
-    parser.add_argument("--giou_loss_coef", type=float, default=2.0, help="Coefficient for GIoU loss")
-    parser.add_argument("--focal_loss", type=bool, default=True, help="Whether to use focal loss")
-    parser.add_argument("--focal_alpha", type=float, default=0.25, help="Alpha parameter for focal loss")
-    parser.add_argument("--focal_gamma", type=float, default=2.0, help="Gamma parameter for focal loss")
-    parser.add_argument("--freeze_encoders", type=bool, default=True, help="Whether to freeze encoders")
-    parser.add_argument("--checkpoints_dir", type = str, help = "path to save checkpoints file")
-    parser.add_argument("--fig_path", type = str, help= "Path to save loss figure")
-    args = parser.parse_args()
-    return args
-
-def train_model(args):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    # Set random seed for reproducibility
-    random_seed = 42
-    random.seed(random_seed)
-    torch.manual_seed(random_seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    train_dataset = CustomCocoDataset(annotation_file=args.ann_file, data_dir=args.train_data_dir, is_train=True)
-
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_worker, collate_fn=custom_collate_fn)
-
-    processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
-    model = OwlViTForObjectDetectionModel.from_pretrained("google/owlvit-base-patch32")
-
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999))
+from train_util import (
+    coco_to_model_input,
+    labels_to_classnames,
+    model_output_to_image,
+    update_metrics
+)
+from util import BoxUtil, GeneralLossAccumulator, ProgressFormatter
 
 
-    epoch_losses = []
+def get_training_config():
+    with open("config.yaml", "r") as stream:
+        data = yaml.safe_load(stream)
+        return data["training"]
 
-    # Freeze layers from vision_model and text_model
-    if args.freeze_encoders:
-        for param in model.owlvit.text_model.parameters():
-            param.requires_grad = False
-
-        for param in model.owlvit.vision_model.parameters():
-            param.requires_grad = False
-
-    for epoch in tqdm(range(args.num_epochs), desc="Training Progress", leave=False):
-        model.train()
-        total_loss = 0.0
-        
-
-        with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.num_epochs}", leave=False) as t:
-            for batch_idx, (images, targets) in enumerate(t):
-                images = [img.to(device) for img in images]
-                batch_target_boxes = [target["boxes"] for target in targets]
-                batch_target_labels = [target["labels"] for target in targets]
-
-                # Batch text labels directly from the targets
-                batch_text_labels = [target["text_labels"] for target in targets]
-            
-                # Batch target size for each image in the batch
-                batch_target_size = torch.tensor([img.shape[-2:] for img in images]).to(device)
-
-                inputs = processor(images=images, text=batch_text_labels, return_tensors="pt")
-                inputs = {k: v.to(device) for k, v in inputs.items()}  
-
-                outputs = model(**inputs, return_dict=True)
-                
-
-                # Accessing pred_logits and pred_boxes for calculating losses
-                pred_logits = outputs["logits"]
-                pred_boxes = outputs["pred_boxes"]
-
-                loss = compute_cost(
-                    tgt_labels=batch_target_labels,
-                    out_logits=pred_logits,
-                    tgt_bbox=batch_target_boxes,
-                    out_bbox=pred_boxes,
-                    num_classes=91,
-                    class_loss_coef=args.class_loss_coef,
-                    bbox_loss_coef=args.bbox_loss_coef,
-                    giou_loss_coef=args.giou_loss_coef,
-                    focal_loss=args.focal_loss,
-                    focal_alpha=args.focal_alpha,
-                    focal_gamma=args.focal_gamma
-                ).mean()
-                loss.backward()
-
-                optimizer.step()
-                total_loss += loss.item()
-                
-
-                #t.set_postfix(loss=total_loss)
-                t.set_postfix(loss=total_loss)  # Print average mAP
-
-        epoch_losses.append(total_loss)
-        print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {total_loss}")
-        
-
-
-    # Save checkpoint after training
-    checkpoint_dir = args.checkpoints_dir
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint_path = os.path.join(checkpoint_dir, "final_model_checkpoint.pt")
-    torch.save(model.state_dict(), checkpoint_path)
-
-    # Plotting the training loss over epochs
-    plt.figure(figsize=(10, 6))
-    plt.plot(range(1, args.num_epochs + 1), epoch_losses, marker='o')
-    plt.xlabel('Epoch')
-    plt.ylabel('Training Loss')
-    plt.title('Training Loss Over Epochs')
-    plt.grid(True)
-    plt.savefig(fname = args.fig_path, format = "png")
-    plt.show()
-    
 
 if __name__ == "__main__":
-    args = parse_args()
-    train_model(args)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True).to(device)
+    scaler = torch.cuda.amp.GradScaler()
+    general_loss = GeneralLossAccumulator()
+    progress_summary = ProgressFormatter()
+
+    if os.path.exists("debug"):
+        shutil.rmtree("debug")
+    training_cfg = get_training_config()
+    
+    
+    train_dataloader, test_dataloader, scales, labelmap = get_dataloaders()
+
+    model = OwlViTForObjectDetectionModel.from_pretrained("google/owlvit-base-patch32")
+    model.to(device)
+    processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
+
+    class_loss_coef, bbox_loss_coef, giou_loss_coef = training_cfg["class_loss_coef"], training_cfg["bbox_loss_coef"], training_cfg["giou_loss_coef"]
+
+
+    criterion = Loss(n_classes= len(labelmap),scales= None,class_loss_coef= class_loss_coef, bbox_loss_coef=bbox_loss_coef, giou_loss_coef=giou_loss_coef)
+
+    postprocess = PostProcess(
+        confidence_threshold=training_cfg["confidence_threshold"],
+        iou_threshold=training_cfg["iou_threshold"],
+    )
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(training_cfg["learning_rate"]),
+        weight_decay=training_cfg["weight_decay"],
+    )
+    model.train()
+    classMAPs = {v: [] for v in list(labelmap.values())}
+
+    for epoch in range(training_cfg["n_epochs"]):
+        if training_cfg["save_eval_images"]:
+            os.makedirs(f"debug/{epoch}", exist_ok=True)
+
+        # Train loop
+        losses = []
+        for i, (image, labels, text_labels, boxes, text_queries, metadata) in enumerate(
+            tqdm(train_dataloader, ncols=60)):
+            # train_dataloader
+            optimizer.zero_grad()
+
+            # Prep inputs
+            image = image.to(device)
+            
+            labels = labels.to(device)
+            text_labels = text_labels
+            convert_text_queries = [item[0] for item in text_queries]
+            
+            # Converting boxes from COCO format [xywh] to [cxcywh] normalize by image size
+            boxes = coco_to_model_input(boxes, metadata).to(device)
+            # print("target boxes", boxes)
+
+            inputs = processor(images = image, text= convert_text_queries, return_tensors="pt")
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            # import pdb;pdb.set_trace()
+            outputs = model(**inputs)
+
+            # Get predictions and save output
+            pred_logits, pred_boxes = outputs['logits'], outputs['pred_boxes']
+            # print("pred_boxes", pred_boxes)
+            #print("pred_boxes shape", pred_boxes.shape)
+            losses = criterion(pred_logits, labels, pred_boxes, boxes)
+            loss = (
+                losses["loss_ce"]
+                + losses["loss_bg"]
+                + losses["loss_bbox"] 
+                + losses["loss_giou"]
+            )
+            
+            loss.backward()
+            optimizer.step()
+
+            general_loss.update(losses)
+
+        train_metrics = general_loss.get_values()
+        general_loss.reset()
+
+
+        # Eval loop
+        model.eval()
+        with torch.no_grad():
+            for i, (image, labels, text_labels, boxes, text_queries, metadata) in enumerate(
+                tqdm(train_dataloader, ncols=60)
+            ):
+                # Prep inputs
+                image = image.to(device)
+                
+                labels = labels.to(device)
+                text_labels = text_labels
+                convert_text_queries = [item[0] for item in text_queries]
+                # Converting boxes from COCO format [xywh] to [cxcywh] 
+                boxes = coco_to_model_input(boxes, metadata).to(device)
+                #print("boxes shape", boxes.shape)
+
+
+                inputs = processor(images = image, text= convert_text_queries, return_tensors="pt")
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                outputs = model(**inputs)
+
+                # Get predictions and save output
+                pred_logits, pred_boxes = outputs['logits'], outputs['pred_boxes']
+                
+                pred_boxes, pred_classes, scores = postprocess(pred_boxes, pred_logits)
+                        
+               
+                update_metrics(metric,
+                               metadata,
+                               pred_boxes,
+                               pred_classes, 
+                               scores,
+                               boxes,
+                               labels)
+
+                # if training_cfg["save_eval_images"]:
+                #     pred_classes_with_names = labels_to_classnames(
+                #         pred_classes, labelmap
+                #     )
+                #     pred_boxes = model_output_to_image(pred_boxes.cpu(), metadata)
+                #     image_with_boxes = BoxUtil.draw_box_on_image(
+                #         metadata["impath"].pop(),
+                #         pred_boxes,
+                #         pred_classes_with_names,
+                #     )
+
+                #     write_png(image_with_boxes, f"debug/{epoch}/{i}.jpg")
+
+        print("Computing metrics...")
+        val_metrics = metric.compute()
+        for i, p in enumerate(val_metrics["map_per_class"].tolist()):
+            label = labelmap[str(i)]
+            classMAPs[label].append(p)
+
+        with open("class_maps.json", "w") as f:
+            json.dump(classMAPs, f)
+
+        metric.reset()
+        progress_summary.update(epoch, train_metrics, val_metrics)
+        progress_summary.print()
+
+
+
+
+
 
 
