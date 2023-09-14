@@ -148,31 +148,3 @@ class BoxUtil:
     ):
         return _box_convert(boxes_batch, in_format, out_format)
     
-class PostProcess:
-    def __init__(self, confidence_threshold=0.75, iou_threshold=0.3):
-        self.confidence_threshold = confidence_threshold
-        self.iou_threshold = iou_threshold
-
-    def __call__(self, all_pred_boxes, pred_classes):
-        # Just support batch size of one for now
-        pred_boxes = all_pred_boxes.squeeze(0)
-        # #Normalize pred_logits
-        # sigmoid = torch.nn.Sigmoid()
-        # pred_classes = sigmoid(pred_classes)
-        pred_classes = pred_classes.squeeze(0)
-
-        top = torch.max(pred_classes, dim=1)
-        scores = top.values
-        classes = top.indices
-
-        idx = scores > self.iou_threshold
-        scores = scores[idx]
-        classes = classes[idx]
-        pred_boxes = pred_boxes[idx]
-
-        # idx = batched_nms(pred_boxes, scores, classes, iou_threshold=self.iou_threshold)
-        # classes = classes[idx]
-        # pred_boxes = pred_boxes[idx]
-        # scores = scores[idx]
-
-        return pred_boxes.unsqueeze_(0), classes.unsqueeze_(0), scores.unsqueeze_(0)

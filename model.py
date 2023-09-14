@@ -1481,7 +1481,7 @@ class PostProcess:
         scores = scores[idx]
         classes = classes[idx]
         pred_boxes = pred_boxes[idx]
-
+       
         idx = batched_nms(pred_boxes, scores, classes, iou_threshold=self.iou_threshold)
         classes = classes[idx]
         pred_boxes = pred_boxes[idx]

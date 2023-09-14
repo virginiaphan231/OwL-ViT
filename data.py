@@ -81,8 +81,9 @@ class AddRandomNegativeLabels:
                 all_classes = [cls for cls in all_classes if cls not in self.text_labels]
 
             # Shuffle the list of classes and select a subset as the sampled negatives
-            random.shuffle(all_classes)
-            self.sampled_negatives_dict[image_id] = random.sample(all_classes, self.total_num_negatives)
+            #random.shuffle(all_classes)
+            #self.sampled_negatives_dict[image_id] = random.sample(all_classes, self.total_num_negatives)
+            self.sampled_negatives_dict[image_id] = all_classes[:self.total_num_negatives]
 
         # Use the pre-generated sampled negatives for this image
         sampled_negatives = self.sampled_negatives_dict[image_id]
@@ -110,23 +111,29 @@ class AddRandomPrompts:
         all_labels_set.sort()
 
         # Modify the prompt templates to include {} for text_labels
-        modified_templates = [template.format('{}') for template in self.prompt_templates]
+        # modified_templates = [template.format('{}') for template in self.prompt_templates]
+        fixed_template = self.prompt_templates[0]
+        format_fixed_template = fixed_template.format('{}')
+        fixed_templates = [format_fixed_template for _ in range(len(all_labels_set))]
 
-        random_templates = [random.choice(modified_templates) for _ in range(len(all_labels_set))]
-        prompted_set = [_add_prompt(label, template) for label, template in zip(all_labels_set, random_templates)]
+        #random_templates = [random.choice(modified_templates) for _ in range(len(all_labels_set))]
+        # prompted_set = [_add_prompt(label, template) for label, template in zip(all_labels_set, random_templates)]
+        prompted_set = [_add_prompt(label, template) for label, template  in zip(all_labels_set, fixed_template)]
 
         is_promptable = [not label.startswith(NOT_PROMPTABLE_MARKER) for label in all_labels_set]
         prompted_set = [prompt if is_promptable else label for prompt, label, is_promptable in zip(prompted_set, all_labels_set, is_promptable)]
 
         prompted_set = [label if label != PADDING_QUERY else '' for label in prompted_set]
 
-        updated_prompted_text_labels = [prompted_set[all_labels_set.index(label)] for label in updated_text_labels]
-        text_queries = [template.format(label) for template, label in zip(random_templates, updated_text_labels)]
+        #updated_prompted_text_labels = [prompted_set[all_labels_set.index(label)] for label in updated_text_labels]
+        # text_queries = [template.format(label) for template, label in zip(random_templates, updated_text_labels)]
+        text_queries = [template.format(label) for template, label in zip(fixed_templates, updated_text_labels)]
 
         # Append empty strings if len(text_queries) is less than max_queries
         while len(text_queries) < max_queries:
             text_queries.append("")
-        return updated_prompted_text_labels, text_queries
+        #return updated_prompted_text_labels, text_queries
+        return None, text_queries
 
 
 class SingleToMultiLabel:

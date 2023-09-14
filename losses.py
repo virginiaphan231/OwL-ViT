@@ -9,7 +9,7 @@ class Loss(torch.nn.Module):
     def __init__(self, n_classes, scales, class_loss_coef, bbox_loss_coef, giou_loss_coef):
         super().__init__()
         self.matcher = HungarianMatcher(n_classes)
-        self.class_criterion = torch.nn.BCEWithLogitsLoss(reduction="none", weight=scales)
+        self.class_criterion = torch.nn.BCELoss(reduction="none", weight=scales)
         self.background_label = n_classes
         self.class_loss_coef = class_loss_coef
         self.bbox_loss_coef = bbox_loss_coef
@@ -22,8 +22,10 @@ class Loss(torch.nn.Module):
 
         src_logits = outputs["pred_logits"]#torch.abs(outputs["pred_logits"])
         src_logits = src_logits.transpose(1, 2)
-        target_classes.squeeze_(0)
-        src_logits.squeeze_(0)
+        # target_classes.squeeze_(0)
+        # src_logits.squeeze_(0)
+        target_classes = target_classes.squeeze(0)
+        src_logits = src_logits.squeeze(0)
 
         pred_logits = src_logits[:, target_classes != self.background_label].t()
         bg_logits = src_logits[:, target_classes == self.background_label].t()
