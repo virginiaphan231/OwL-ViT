@@ -18,7 +18,7 @@ LABELMAP_FILE = "data/labelmap.json"
 NOT_PROMPTABLE_MARKER = '#'
 PADDING_QUERY = ''
 
-MAX_QUERIES = 80
+MAX_QUERIES = 10#80
 NUM_CLASSES = 80 # no-object label will be added during multi-hot encoding 
 
 CLIP_PROMPT_TEMPLATES = [
@@ -178,6 +178,7 @@ class OwlDataset(Dataset):
     def __init__(self, annotations_file, labelmap):
         self.images_dir = get_images_dir()
         self.labelmap = labelmap
+        self.label_text2id = {v:k for k, v in self.labelmap.items()}
 
         with open(annotations_file) as f:
             data = json.load(f)
@@ -185,6 +186,8 @@ class OwlDataset(Dataset):
 
         self.data = [{k: v} for k, v in data.items() if len(v)]
         print(f"Dropping {n_total - len(self.data)} examples due to no annotations")
+
+        self.max_promt_length = 10
 
     def load_image(self, idx: int) -> Image.Image:
         url = list(self.data[idx].keys())[0]
@@ -212,6 +215,10 @@ class OwlDataset(Dataset):
         labels = torch.tensor(labels)
         boxes = torch.tensor(boxes, dtype=torch.float32)
         return labels, boxes, text_labels
+
+    def unique(self, sequence):
+        seen = set()
+        return [x for x in sequence if not (x in seen or seen.add(x))]
     
     def __len__(self):
         return len(self.data)
@@ -219,8 +226,9 @@ class OwlDataset(Dataset):
     def __getitem__(self, idx):
         image, path = self.load_image(idx)
         labels, boxes, text_labels = self.load_target(idx)
-        #print("original labels shape", labels.shape)
-        #print("original boxes shape", boxes.shape)
+        # print("--- Text labels: ", text_labels)
+        # print("original labels shape", labels.shape)
+        # print("original boxes shape", boxes.shape)
         w, h = image.size
         metadata = {
             "width": w,
@@ -231,30 +239,40 @@ class OwlDataset(Dataset):
         transform = transforms.ToTensor()
         image_tensor = transform(image)
 
+        text_promts = self.unique(text_labels)
+        text_promts_id = [self.label_text2id[t] for t in text_promts]
+        new_labels = torch.tensor([text_promts_id.index(str(int(i))) for i in list(labels)])
+        # print("--- Labels: ", labels, "New label:", new_labels)
+
+        remaining = list(set(list(self.label_text2id.keys())) - set(text_promts))
+        remaining = random.choices(remaining, k=self.max_promt_length - len(text_promts))
+        new_text_promts = text_promts + remaining
+        # print("---text prompt:", text_promts, "---new_text_prompt:", new_text_promts)
+
         # Use AddRandomNegativeLabels class
-        add_random_negatives = AddRandomNegativeLabels()
-        updated_text_labels = add_random_negatives.apply(text_labels, image_id = idx)
+        # add_random_negatives = AddRandomNegativeLabels()
+        # updated_text_labels = add_random_negatives.apply(text_labels, image_id = idx)
+        # updated_text_labels = text_labels
         # print("labels", labels)
         # print("text_labels", len(text_labels))
         # print("updated_text_labels", len(updated_text_labels))
 
-
         # Use AddRandomPrompts class
-        add_random_prompts = AddRandomPrompts(CLIP_PROMPT_TEMPLATES)
-        _, text_queries = add_random_prompts.apply(updated_text_labels, MAX_QUERIES)
+        # add_random_prompts = AddRandomPrompts(CLIP_PROMPT_TEMPLATES)
+        # _, text_queries = add_random_prompts.apply(updated_text_labels, MAX_QUERIES)
         #print("updated_prompted_text_label", len(updated_prompted_text_labels))
 
         # Convert labels to multi-label format
-        single_to_multi_label = SingleToMultiLabel(max_num_labels=NUM_CLASSES)
-        multi_label = single_to_multi_label.apply(labels)
+        # single_to_multi_label = SingleToMultiLabel(max_num_labels=NUM_CLASSES)
+        # multi_label = single_to_multi_label.apply(labels)
         #print("multi_label length", len(multi_label))
 
-
         # Convert multi-label to multi-hot representation
-        multi_label_to_multi_hot = MultiLabelToMultiHot(num_classes=NUM_CLASSES)
-        multi_hot_label = multi_label_to_multi_hot.apply(multi_label)
+        # multi_label_to_multi_hot = MultiLabelToMultiHot(num_classes=NUM_CLASSES)
+        # multi_hot_label = multi_label_to_multi_hot.apply(multi_label)
         #print("multi_hot_label shape", multi_hot_label.shape)
-        return image_tensor, labels, text_labels, boxes, text_queries, metadata
+
+        return image_tensor, new_labels, text_labels, boxes, new_text_promts, metadata
 
 def get_dataloaders(
     train_annotations_file=TRAIN_ANNOTATIONS_FILE,

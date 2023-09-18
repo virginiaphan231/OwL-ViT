@@ -8,9 +8,9 @@ from matcher import HungarianMatcher, box_iou, generalized_box_iou
 class Loss(torch.nn.Module):
     def __init__(self, n_classes, scales, class_loss_coef, bbox_loss_coef, giou_loss_coef):
         super().__init__()
-        self.matcher = HungarianMatcher(n_classes)
+        self.matcher = HungarianMatcher(10)#n_classes)
         self.class_criterion = torch.nn.BCELoss(reduction="none", weight=scales)
-        self.background_label = n_classes
+        self.background_label = 10 #n_classes
         self.class_loss_coef = class_loss_coef
         self.bbox_loss_coef = bbox_loss_coef
         self.giou_loss_coef = giou_loss_coef
@@ -19,8 +19,7 @@ class Loss(torch.nn.Module):
         """
         Custom loss that works off of similarities
         """
-
-        src_logits = outputs["pred_logits"]#torch.abs(outputs["pred_logits"])
+        src_logits = outputs["pred_logits"].softmax(-1)#torch.abs(outputs["pred_logits"])
         src_logits = src_logits.transpose(1, 2)
         # target_classes.squeeze_(0)
         # src_logits.squeeze_(0)
@@ -109,7 +108,7 @@ class Loss(torch.nn.Module):
             iou, _ = box_iou(box.unsqueeze(0), predicted_boxes.squeeze(0))
             idx = iou > 0.85
             target_classes[idx] = label.item()
-
+        
         loss_class, loss_background = self.class_loss(in_preds, target_classes, class_loss_coef= self.class_loss_coef)
 
         losses = {

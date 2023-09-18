@@ -2,7 +2,7 @@ import os
 import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.utils.checkpoint
@@ -946,6 +946,7 @@ class OwlViTModel(OwlViTPreTrainedModel):
         text_config = config.text_config
         vision_config = config.vision_config
 
+        #self.projection_dim = 10#config.projection_dim
         self.projection_dim = config.projection_dim
         self.text_embed_dim = text_config.hidden_size
         self.vision_embed_dim = vision_config.hidden_size
@@ -1151,10 +1152,11 @@ class OwlViTClassPredictionHead(nn.Module):
             batch_size,num_patches = image_class_embeds.shape[:2]
             pred_logits = torch.zeros((batch_size, num_patches, self.query_dim)).to(device)
             return (pred_logits, image_class_embeds)
+        
         # Normalize image and text features
         image_class_embeds = image_class_embeds / (torch.linalg.norm(image_class_embeds, dim = -1, keepdim = True) + 1e-6)
         query_embeds = query_embeds / (torch.linalg.norm(query_embeds, dim = -1, keepdim = True) + 1e-6)
-        
+
         # Get class predictions
         pred_logits = torch.einsum("...pd, ...qd -> ...pq", image_class_embeds, query_embeds)
         

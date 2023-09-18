@@ -13,10 +13,10 @@ def coco_to_model_input(boxes, metadata):
 def model_output_to_image(boxes, metadata):
     # Model outputs in cxcywh normalized coordinates, so scale up
     # before overlaying on image
+    boxes = BoxUtil.box_convert(boxes, "cxcywh", "xyxy")
     boxes = BoxUtil.scale_bounding_box(
         boxes, metadata["width"], metadata["height"], mode="up"
     )
-
     return boxes
 
 

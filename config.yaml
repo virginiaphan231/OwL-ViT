@@ -11,7 +11,7 @@ training:
   use_class_weight: true 
   class_loss_coef: 0.5
   bbox_loss_coef: 1
-  giou_loss_coef: 1
+  giou_loss_coef: 0.2
   weight_decay: 0.01  # default
   confidence_threshold: 0.01
   iou_threshold: 0.6  # For nms

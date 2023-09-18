@@ -4,7 +4,7 @@ import time
 import numpy as np
 from tabulate import tabulate
 import torch
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 from torchvision.io import read_image
 from torchvision.ops import box_convert as _box_convert
 from torchvision.utils import draw_bounding_boxes
