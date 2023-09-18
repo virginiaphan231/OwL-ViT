@@ -18,7 +18,7 @@ LABELMAP_FILE = "data/labelmap.json"
 NOT_PROMPTABLE_MARKER = '#'
 PADDING_QUERY = ''
 
-MAX_QUERIES = 10#80
+MAX_QUERIES = 20 #10#80
 NUM_CLASSES = 80 # no-object label will be added during multi-hot encoding 
 
 CLIP_PROMPT_TEMPLATES = [
@@ -185,9 +185,10 @@ class OwlDataset(Dataset):
             n_total = len(data)
 
         self.data = [{k: v} for k, v in data.items() if len(v)]
-        print(f"Dropping {n_total - len(self.data)} examples due to no annotations")
+        #print(f"Dropping {n_total - len(self.data)} examples due to no annotations")
 
-        self.max_promt_length = 10
+        #self.max_promt_length = 10
+        self.max_promt_length = 20
 
     def load_image(self, idx: int) -> Image.Image:
         url = list(self.data[idx].keys())[0]

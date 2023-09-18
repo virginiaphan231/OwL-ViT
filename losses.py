@@ -6,11 +6,13 @@ import numpy as np
 from matcher import HungarianMatcher, box_iou, generalized_box_iou
 
 class Loss(torch.nn.Module):
-    def __init__(self, n_classes, scales, class_loss_coef, bbox_loss_coef, giou_loss_coef):
+    def __init__(self, scales, class_loss_coef, bbox_loss_coef, giou_loss_coef):
         super().__init__()
-        self.matcher = HungarianMatcher(10)#n_classes)
+        #self.matcher = HungarianMatcher(10)#n_classes)
+        self.matcher = HungarianMatcher(20)
         self.class_criterion = torch.nn.BCELoss(reduction="none", weight=scales)
-        self.background_label = 10 #n_classes
+        #self.background_label = 10 #n_classes
+        self.background_label = 20
         self.class_loss_coef = class_loss_coef
         self.bbox_loss_coef = bbox_loss_coef
         self.giou_loss_coef = giou_loss_coef
@@ -67,7 +69,7 @@ class Loss(torch.nn.Module):
         metadata["loss_bbox"] = loss_bbox.tolist()
 
         loss_giou = 1 - torch.diag(generalized_box_iou(box_convert(target_boxes, in_fmt= 'cxcywh', out_fmt= 'xyxy'),
-                                         box_convert(src_boxes, in_fmt= 'cxcywh', out_fmt='xyxy')))
+                                                       box_convert(src_boxes, in_fmt= 'cxcywh', out_fmt='xyxy')))
         loss_giou = loss_giou.sum() / num_boxes
 
         return loss_bbox * bbox_loss_coef , loss_giou * giou_loss_coef

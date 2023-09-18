@@ -1,17 +1,17 @@
 data:
   images_path: C:\Users\admin\Desktop\VDT_Project\coco_minitrain_25k\coco_minitrain_25k\images\train2017
   annotations_file: C:\Users\admin\Desktop\VDT_Project\coco_minitrain_25k\coco_minitrain_25k\annotations\instances_minitrain2017.json
-  num_train_images:  100
-  num_test_images: 15
+  num_train_images:  10000
+  num_test_images: 2000
 
 training:
-  n_epochs: 50
+  n_epochs: 3
   learning_rate: 1e-4
   save_eval_images: true
   use_class_weight: true 
   class_loss_coef: 0.5
   bbox_loss_coef: 1
-  giou_loss_coef: 0.2
+  giou_loss_coef: 0.45
   weight_decay: 0.01  # default
   confidence_threshold: 0.01
   iou_threshold: 0.6  # For nms
