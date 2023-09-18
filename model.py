@@ -946,7 +946,6 @@ class OwlViTModel(OwlViTPreTrainedModel):
         text_config = config.text_config
         vision_config = config.vision_config
 
-        #self.projection_dim = 10#config.projection_dim
         self.projection_dim = config.projection_dim
         self.text_embed_dim = text_config.hidden_size
         self.vision_embed_dim = vision_config.hidden_size

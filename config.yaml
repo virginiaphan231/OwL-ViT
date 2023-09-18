@@ -5,15 +5,15 @@ data:
   num_test_images: 2000
 
 training:
-  n_epochs: 3
+  n_epochs: 10
   learning_rate: 1e-4
   save_eval_images: true
   use_class_weight: true 
   class_loss_coef: 0.5
   bbox_loss_coef: 1
-  giou_loss_coef: 0.45
+  giou_loss_coef: 0.2
   weight_decay: 0.01  # default
-  confidence_threshold: 0.01
+  confidence_threshold: 0.1
   iou_threshold: 0.6  # For nms
   # NOTE: Use these values for benchmarking to stay consistent with YOLO, fasterRCNN, SSD, DETR,... etc
   #   confidence_threshold: 0.01  

@@ -33,6 +33,12 @@ def get_training_config():
         data = yaml.safe_load(stream)
         return data["training"]
 
+# Define a directory to save checkpoints
+checkpoint_dir = "checkpoints"
+
+# Create the directory if it doesn't exist
+if not os.path.exists(checkpoint_dir):
+    os.makedirs(checkpoint_dir)
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -55,12 +61,12 @@ if __name__ == "__main__":
     model.to(device)
     processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
 
-    print([n for n, p in model.named_parameters() if p.requires_grad])
-    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+    # print([n for n, p in model.named_parameters() if p.requires_grad])
+    # print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     class_loss_coef, bbox_loss_coef, giou_loss_coef = training_cfg["class_loss_coef"], training_cfg["bbox_loss_coef"], training_cfg["giou_loss_coef"]
 
-    criterion = Loss(n_classes= len(labelmap),scales= None,class_loss_coef= class_loss_coef, bbox_loss_coef=bbox_loss_coef, giou_loss_coef=giou_loss_coef)
+    criterion = Loss(scales= None,class_loss_coef= class_loss_coef, bbox_loss_coef=bbox_loss_coef, giou_loss_coef=giou_loss_coef)
 
     postprocess = PostProcess(
         confidence_threshold=training_cfg["confidence_threshold"],
@@ -93,14 +99,15 @@ if __name__ == "__main__":
             labels = labels.to(device)
             text_labels = text_labels
             convert_text_queries = [item[0] for item in text_queries]
-            convert_text_queries = ['a photo of a {}'.format(t) for t in convert_text_queries][:10]
+            #convert_text_queries = ['a photo of a {}'.format(t) for t in convert_text_queries][:10]
+            coonvert_text_queries = ['a photo of a {}'.format(t) for t in convert_text_queries[:20]]
             # Converting boxes from COCO format [xywh] to [cxcywh] normalize by image size
             boxes = coco_to_model_input(boxes, metadata).to(device)
-            # print("target boxes", boxes)
             
-
-            # inputs = processor(images = image, text= [convert_text_queries], return_tensors="pt")
-            inputs = processor(images = Image.open(metadata['impath'][0]), text= convert_text_queries, return_tensors="pt")
+            try:
+                inputs = processor(images = Image.open(metadata['impath'][0]).convert('RGB'), text= convert_text_queries, return_tensors="pt")
+            except ValueError:
+                import pdb; pdb.set_trace()
             inputs = {k: v.to(device) for k, v in inputs.items()}
             outputs = model(**inputs)
             
@@ -117,30 +124,12 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-            general_loss.update(losses)
-            # pred_boxes, pred_classes, scores = postprocess(pred_boxes, pred_logits_normalized)
-                
-            # update_metrics(metric,
-            #                 metadata,
-            #                 pred_boxes,
-            #                 pred_classes, 
-            #                 scores,
-            #                 boxes,
-            #                 labels)
-
-        # val_metrics = metric.compute()
-        # for i, p in enumerate(val_metrics["map_per_class"].tolist()):
-        #     label = labelmap[str(i)]
-        #     classMAPs[label].append(p)
+            general_loss.update(losses)  
 
         train_metrics = general_loss.get_values()
         general_loss.reset()
-        # metric.reset()
-        # progress_summary.update(epoch, train_metrics, val_metrics)
-        # progress_summary.print()
 
-
-        # # Eval loop
+        # Eval loop
         model.eval()
         with torch.no_grad():
             for i, (image, labels, text_labels, boxes, text_queries, metadata) in enumerate(
@@ -152,14 +141,12 @@ if __name__ == "__main__":
                 labels = labels.to(device)
                 text_labels = text_labels
                 convert_text_queries = [item[0] for item in text_queries]
-                convert_text_queries = ['a photo of a {}'.format(t) for t in convert_text_queries][:10]
+                #convert_text_queries = ['a photo of a {}'.format(t) for t in convert_text_queries][:10]
+                convert_text_queries = ['a photo of a {}'.format(t) for t in convert_text_queries][:20]
                 # Converting boxes from COCO format [xywh] to [cxcywh] normalize by image size
                 boxes = coco_to_model_input(boxes, metadata).to(device)
-                # print("target boxes", boxes)
                 
-
-                # inputs = processor(images = image, text= [convert_text_queries], return_tensors="pt")
-                inputs = processor(images = Image.open(metadata['impath'][0]), text= convert_text_queries, return_tensors="pt")
+                inputs = processor(images = Image.open(metadata['impath'][0]).convert('RGB'), text= convert_text_queries, return_tensors="pt")
                 inputs = {k: v.to(device) for k, v in inputs.items()}
                 outputs = model(**inputs)
 
@@ -198,6 +185,18 @@ if __name__ == "__main__":
 
         with open("class_maps.json", "w") as f:
             json.dump(classMAPs, f)
+
+        # Save a checkpoint at the end of each epoch in the checkpoint directory
+        checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "train_metrics": train_metrics,
+            "val_metrics": val_metrics,
+        }
+        torch.save(checkpoint, checkpoint_path)
+        print("Checkpoints saved")
 
         metric.reset()
         progress_summary.update(epoch, train_metrics, val_metrics)
