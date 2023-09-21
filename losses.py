@@ -31,7 +31,7 @@ class Loss(torch.nn.Module):
         pred_logits = src_logits[:, target_classes != self.background_label].t()
         bg_logits = src_logits[:, target_classes == self.background_label].t()
         target_classes = target_classes[target_classes != self.background_label]
-        # import pdb;pdb.set_trace()
+        
         # Positive loss
         pos_targets = torch.nn.functional.one_hot(target_classes, self.background_label)
         neg_targets = torch.zeros(bg_logits.shape).to(bg_logits.device)
@@ -102,7 +102,7 @@ class Loss(torch.nn.Module):
             num_boxes=sum(len(t["labels"]) for t in in_targets), bbox_loss_coef= self.bbox_loss_coef, giou_loss_coef= self.giou_loss_coef
         )
 
-        # TODO: Optimize this part
+        
         for box, label in zip(predicted_boxes[0], target_classes[0]):
             if label == self.background_label:
                 continue
