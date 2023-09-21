@@ -8,9 +8,10 @@ import torch.nn.functional as F
 import yaml
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+import torchvision.transforms.v2 as transforms
 from transformers import OwlViTProcessor
 from collections import Counter
+
 # Constants
 TRAIN_ANNOTATIONS_FILE = "data/train.json"
 TEST_ANNOTATIONS_FILE = "data/test.json"
@@ -76,9 +77,10 @@ class AddRandomPrompts:
 
 
 class OwlDataset(Dataset):
-    def __init__(self, annotations_file, labelmap):
+    def __init__(self, annotations_file, labelmap, is_train):
         self.images_dir = get_images_dir()
         self.labelmap = labelmap
+        self.is_train = is_train
         self.label_text2id = {v:k for k, v in self.labelmap.items()}
 
         with open(annotations_file) as f:
@@ -133,9 +135,7 @@ class OwlDataset(Dataset):
             "height": h,
             "impath": path,
         }
-        # # Apply transformations to convert the image to a tensor
-        transform = transforms.ToTensor()
-        image_tensor = transform(image)
+        
 
         text_promts = self.unique(text_labels)
         text_promts_id = [self.label_text2id[t] for t in text_promts]
@@ -149,8 +149,70 @@ class OwlDataset(Dataset):
         add_random_prompts = AddRandomPrompts(CLIP_PROMPT_TEMPLATES)
         _, text_queries = add_random_prompts.apply(new_text_promts)
 
+        # Apply augmentation transformation
+        if self.is_train:
+            transform = transforms.Compose([transforms.Resize(size= (768,768)),
+                                            transforms.RandomHorizontalFlip(p = 0.2),
+                                            transforms.RandomRotation(degrees = 30),
+                                            transforms.ToImageTensor(),
+                                            ])
+        else:
+            transform = transforms.Compose([transforms.Resize(size=(768,768)),
+                                            transforms.ToImageTensor()])
+        
+        
+        image_tensor, boxes, new_labels = transform(image, boxes, new_labels)
+    
+
+        # OwlDataset returns images, new_labels, boxes, text_queries, metadata as tensors
         return image_tensor, new_labels, boxes, text_queries, metadata
 
+# def custom_collate(batch):
+#     images, labels, boxes, text_queries, metadata = zip(*batch)
+#     # Stack the image tensors into a batch
+#     images = torch.stack(images)
+
+#     # Find the maximum length of labels in this batch
+#     max_len = max(len(label) for label in labels)
+#     # Create a padded_labels list to hold the padded labels
+#     padded_labels = []
+    
+#     # Pad each label sequence with zeros to match the maximum length
+#     for label in labels:
+#         padding_length = max_len - len(label)
+#         padded_label = np.pad(label, (0, padding_length), 'constant', constant_values=0)
+#         padded_labels.append(padded_label)
+    
+#     # Stack the padded labels into a tensor
+#     labels = torch.tensor(padded_labels)
+
+#     # Find the maximum number of bounding boxes in this batch
+#     max_num_boxes = max(boxes.shape[0] for boxes in boxes)
+    
+#     # Create a padded_boxes list to hold the padded bounding boxes
+#     padded_boxes = []
+    
+#     # Pad each bounding box sequence with zeros to match the maximum number of boxes
+#     for box_tensor in boxes:
+#         num_boxes = box_tensor.shape[0]
+#         padding_rows = max_num_boxes - num_boxes
+#         if padding_rows > 0:
+#             padding = torch.zeros((padding_rows, 4), dtype=torch.float32)
+#             padded_box_tensor = torch.cat((box_tensor, padding), dim=0)
+#         else:
+#             padded_box_tensor = box_tensor
+#         padded_boxes.append(padded_box_tensor)
+    
+#     # Stack the padded boxes into a tensor
+#     boxes = torch.stack(padded_boxes)
+
+#     # # Stack text_queries list into a batch
+#     # text_queries = torch.tensor(text_queries)
+
+#     # # Stack metadata list into a batch
+#     # metadata = torch.tensor(metadata)
+
+#     return images, labels, boxes, text_queries, metadata
 
 
 def get_dataloaders(
@@ -160,8 +222,8 @@ def get_dataloaders(
     with open(LABELMAP_FILE) as f:
         labelmap = json.load(f)
 
-    train_dataset = OwlDataset(train_annotations_file, labelmap)
-    test_dataset = OwlDataset(test_annotations_file, labelmap)
+    train_dataset = OwlDataset(train_annotations_file, labelmap, is_train= True)
+    test_dataset = OwlDataset(test_annotations_file, labelmap, is_train= False)
 
 
     train_labelcounts = Counter()
