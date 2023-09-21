@@ -98,12 +98,14 @@ if __name__ == "__main__":
             
             labels = labels.to(device)
             convert_text_queries = [item[0] for item in text_queries]
+            # text_queries = text_queries.to(device)
             
             # Converting boxes from COCO format [xywh] to [cxcywh] normalize by image size
             boxes = coco_to_model_input(boxes, metadata).to(device)
             
             
-            inputs = processor(images = Image.open(metadata['impath'][0]).convert('RGB'), text= convert_text_queries, return_tensors="pt")
+            #inputs = processor(images = Image.open(metadata['impath'][0]).convert('RGB'), text= convert_text_queries, return_tensors="pt")
+            inputs = processor(images = image, text= convert_text_queries, return_tensors= "pt")
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
             outputs = model(**inputs)
@@ -136,11 +138,13 @@ if __name__ == "__main__":
                 image = image.to(device)
                 labels = labels.to(device)
                 convert_text_queries = [item[0] for item in text_queries]
+                #text_queries = text_queries.to(device)
                
                 # Converting boxes from COCO format [xywh] to [cxcywh] normalize by image size
                 boxes = coco_to_model_input(boxes, metadata).to(device)
                 
-                inputs = processor(images =Image.open(metadata['impath'][0]).convert('RGB'), text= convert_text_queries, return_tensors="pt")
+                #inputs = processor(images =Image.open(metadata['impath'][0]).convert('RGB'), text= convert_text_queries, return_tensors="pt")
+                inputs = processor(images = image, text= convert_text_queries, return_tensors= "pt")
                 inputs = {k: v.to(device) for k, v in inputs.items()}
                 outputs = model(**inputs)
 
