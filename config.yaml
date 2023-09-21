@@ -1,8 +1,8 @@
 data:
   images_path: C:\Users\admin\Desktop\VDT_Project\coco_minitrain_25k\coco_minitrain_25k\images\train2017
   annotations_file: C:\Users\admin\Desktop\VDT_Project\coco_minitrain_25k\coco_minitrain_25k\annotations\instances_minitrain2017.json
-  num_train_images:  10000
-  num_test_images: 2000
+  num_train_images:  200
+  num_test_images: 20
 
 training:
   n_epochs: 10
