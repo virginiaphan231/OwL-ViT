@@ -147,4 +147,5 @@ with gr.Blocks() as demo:
     inference_img_btn.click(image_guided_inference, inputs= [input_img, query_img, img_score_threshold, nms_threshold], outputs= [out_img])
 
 if __name__ == "__main__":
+    demo.queue(max_size=20)
     demo.launch(share= True)
